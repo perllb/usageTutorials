@@ -1,0 +1,177 @@
+---
+title: "deseqTE analysis"
+author: "Per Ludvik Brattaas"
+date: "December 4, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1. Load and install libraries
+
+```{r loading, message=FALSE}
+## TE clustering and analysis
+rm(list=ls())
+library(DESeq2)
+library(devtools)
+install_github("perllb/deseqAbstraction")
+library(deseqAbstraction)
+
+```
+
+### 2. Define file path and header
+```{r path_header, message=FALSE}
+## path to featureCount file
+path <- "/home/pbrattaas/LocalData/HumanChimp/QuantHumanChimp/hg38_genome/humanChimp_hg38.s2.unique.ERE.notInExonGencode.txt"
+## to easier get the sample names, read header of the file
+header <- read.delim(path,nrows = 1,skip=1,header=T)
+## define samples by removing noise from filepaths of each bam file
+samples <- gsub(pattern ="X.projects.fs1.medpvb.backup.projects.ChimpHuman.Aligned_hg38_STAR_unique.hg38.unique.",replacement = "",gsub(pattern = "Aligned.sortedByCoord.out.bam",replacement = "",x = names(header)))
+
+```
+
+### 3. Define colData
+#### This always has to be done manually 
+#### > "condition" will have the main group info and MUST be defined
+#### > "samples" has the sample IDs and MUST be defined
+#### > other columns depends on user
+```{r}
+# colData setup
+line <- rep(c("ch-iPS","hu-iPS","h9"),8)
+species <- rep(c("chimp","human","human"),8)
+time <- rep(c(rep("d13",3),rep("d14",3),rep("d15",3),rep("d16",3)),2)
+cond <- paste(species,line,time,sep = "-")
+batch <- rep(c("1","2"),each=12)
+colDat <- data.frame(species=species,time=time,condition=cond,line=line,samples=samples[-c(1:6)],batch=batch)
+
+```
+
+### 4. Create deseqTE object
+##### - This step includes reading the featureCount file (in the path variable)
+##### - This step also filters data. By default, all elements with less that 5 reads on average in all samples are removed from data. The filtered data will also be written to the same directory as the original file. If you want to create a deseqTE object again with that featureCount file, the filtered file will be read instead (to save time). If you do not want to read the filtered file, it either has to be deleted, or you have to specify another filtering cutoff to use (shown below).
+```{r}
+# create deseqTE object
+te <- deseqTE$new(name="teHuCh",filename=path,colData=colDat,genome="hg38")
+
+# create deseqTE object with another filter
+##te <- deseqTE$new(name="teHuCh",filename=path,colData=colDat,genome="hg38",filter=3)
+```
+
+### 4.1 peak at object
+```{r,message=F,}
+## peak look at raw file, counts and baseMean
+#head(te$rawfile)
+head(te$rawCounts)
+```
+
+### 5. Run the main DESeq pipeline automated!
+```{r}
+## run deseq and qc
+te$fullAuto()
+```
+
+### 5. Sample QC
+```{r}
+## plot general QC to see if data looks OK
+te$sampleQC()
+```
+
+
+### 6. Manually do PCA and look at reads assigned..
+```{r}
+# How many reads are assigned to RepeatMasker annotation used?
+te$readsAssigned(nonAssigned = T)
+# You can also plot only the percentage of reads mapping to RepeatMasker
+te$readsAssigned(nonAssigned = F)
+# Make PCA plot
+te$pca(label = te$colData$samples)
+# Define how many genes to include 
+te$pca(label = te$colData$samples,ntop = 100)
+# Define how to color and shape data points
+# Here, color points by if it is batch 1 or 2
+# And shape them according to cell line used
+te$pca(label = te$colData$samples,col = te$colData$batch,shape = te$colData$line)
+```
+
+### 7. Percentage of reads mapping to TEs? 
+#### > Can also look specifically at distinct classes, families and subfamilies
+```{r}
+
+te$percentTE()
+## looking more at TEs
+te$percentTE(subfam = c("L1HS","L1PA2","L1PA3"))#,summaryFile = "/home/pbrattaas/LocalData/HumanChimp/QuantHumanChimp/humanChimp_hg38.s2.unique.ERE.notInExonGencode.txt.summary")
+# classes
+#te$percentTE(TEclass = c("LINE","SINE","LTR"))
+# some families 
+te$percentTE(family = c("L1","L2","ERVK","ERV1","Alu"))
+
+```
+
+### 8. Retrieve data from certain families, classes or subfamilies
+```{r}
+# get VST data for subfamilies 
+l1hs.vst <- te$getSubFamily(data = te$VST,subfamily = c("L1HS"))
+# get VST data for families 
+l1.vst <- te$getFamily(data = te$VST,family = c("L1"))
+# get VST data for classes
+ltr.vst <- te$getTEClass(data = te$VST,TEclass = c("LTR"))
+
+# get RPKM data for subfamilies 
+l1hs.RPKM <- te$getSubFamily(data = te$rpkm,subfamily = c("L1HS"))
+# get RPKM data for families 
+l1.RPKM <- te$getFamily(data = te$rpkm,family = c("L1"))
+# get RPKM data for classes
+ltr.RPKM <- te$getTEClass(data = te$rpkm,TEclass = c("LTR"))
+```
+
+### 9. Custom Diffex tests
+```{r}
+## diffex tests
+te$test$Default
+names(te$test)
+
+resultsNames(te$deseq)
+te$colData
+
+# do new tests:
+# test: human d16 vs chimp d16
+te$makeDiffex(name = "d16_human.vs.chimp",c1 = "human-hu-iPS-d16",c2="chimp-ch-iPS-d16")
+# test: human d16 vs human d13
+te$makeDiffex(name = "human_d16.vs.d13",c1 = "human-hu-iPS-d16",c2="human-hu-iPS-d13")
+# list the tests done so far
+names(te$test)
+
+## look at the top 10 most significant genes in the two tests
+te$test$human_d16.vs.d13[order(te$test$human_d16.vs.d13$padj),][1:10,]
+te$test$d16_human.vs.chimp[order(te$test$d16_human.vs.chimp$padj),][1:10,]
+
+# write the diffex tests to a file
+write.table(x = te$test$d16_human.vs.chimp,file = "Diffex_HumanIPS.d16.vs.chimpIPS.d16.txt",quote = F,sep = "\t",row.names = T)
+write.table(x = te$test$human_d16.vs.d13,file = "Diffex_HumanIPS.d16.vs.d13.txt",quote = F,sep = "\t",row.names = T)
+```
+
+### 10. Visualize custom diffex tests
+```{r}
+## look at human d16 vs d13 test
+te$test$human_d16.vs.d13
+te$maPlotTE(testData = te$test$human_d16.vs.d13,p = .05,l = 0.1,c1 = "human-iPS-d16",c2="human-iPS-d13")
+
+# get data only for l1!
+l1.test.h16.vs.13 <- te$getFamily(data = te$test$human_d16.vs.d13,family = "L1")
+te$maPlotTE(testData = l1.test.h16.vs.13,p = .1,l=.1,c1 = "human-iPS-d16",c2="human-iPS-d13")
+
+## look at human d16 vs chimp d16 test
+te$test$d16_human.vs.chimp
+te$maPlotTE(testData = te$test$d16_human.vs.chimp,p = .001,l = 0.1,c1 = "human-iPS-d16",c2="chimp-iPS-d16")
+
+# get data only for LTR class!
+ltr.test.d16.hu.vs.ch <- te$getTEClass(data = te$test$d16_human.vs.chimp,TEclass = "LTR")
+te$maPlotTE(testData = ltr.test.d16.hu.vs.ch,p = .001,l=.1,c1 = "human-iPS-d16",c2="chimp-iPS-d16")
+# get data only for L1 family!
+l1.test.d16.hu.vs.ch <- te$getFamily(data = te$test$d16_human.vs.chimp,family = "L1")
+te$maPlotTE(testData = l1.test.d16.hu.vs.ch,p = .001,l=.1,c1 = "human-iPS-d16",c2="chimp-iPS-d16")
+
+```
+

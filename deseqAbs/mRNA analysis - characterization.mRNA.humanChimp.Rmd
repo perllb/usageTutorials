@@ -1,0 +1,417 @@
+---
+title: "human chimp gene analysis deseqAbstraction"
+author: "Per Ludvik Brattaas"
+date: "December 13, 2017"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Pipeline of Human/Chimp forebrain diff RNAseq: mRNA
+### 1. Setup of environment
+#### Before deseqAbstraction can be used, there are a few steps that has to be done manually:
+
+#### 1.1 Load needed packages
+```{r set up }
+rm(list=ls())
+library(DESeq2)
+library(devtools)
+install_github("perllb/deseqAbstraction")
+library(deseqAbstraction)
+```
+
+#### 1.2 Define input
+```{r input}
+## FeatureCount raw file
+path <- "/home/pbrattaas/LocalData/HumanChimp/QuantHumanChimp/hg38_genome/humanChimp_hg38.s2.multi.Gencode.Exon.txt"
+## Get the sampleFile name header
+header <- read.delim(path,nrows = 1,skip=1,header=T)
+## Define sample names, by removing pre- and suffix 
+samples <- gsub(pattern ="X.projects.fs1.medpvb.backup.projects.ChimpHuman.Aligned_hg38_STAR_mMap.hg38.mMap.",replacement = "",gsub(pattern = "Aligned.sortedByCoord.out.bam",replacement = "",x = names(header)))
+```
+
+#### 1.3 Define metadata
+##### Note that 'condition' and 'samples' are needed here. Conditions define the design of DESeq object, defines what can be tested for and how the data is normalized.
+```{r coldata}
+## fix colData
+line <- rep(c("pt_iPS","hs_iPS","h9"),8)
+species <- rep(c("chimp","human","human"),8)
+time <- rep(c(rep("d13",3),rep("d14",3),rep("d15",3),rep("d16",3)),2)
+cond <- paste(line,time,sep = "-")
+batch <- rep(c("batch_1","batch_2"),each=12)
+colDat <- data.frame(species=species,time=time,condition=cond,line=line,samples=samples[-c(1:6)],batch=batch)
+```
+
+### 2. Create deseqAbs object
+```{r objectcreate}
+## create object
+genc <- deseqAbs$new(name="gencode",filename=path,colData=colDat)
+```
+
+### 3. Perform automated data processing
+```{r run auto}
+## run main starter pipe
+genc$fullAuto()
+```
+
+### 4. Perform standard QC analysis of data
+```{r qc}
+## run standard qc
+genc$sampleQC()
+```
+
+### 5. Create some extra PCA plots to look at batch effect. 
+#### Note how to define coloring and shape of points, as well as number of genes to include in analysis (top variable genes)
+```{r pca}
+genc$pca(label = genc$colData$samples,ntop = 5000,col = genc$colData$batch,shape = genc$colData$line)
+genc$pca(label = genc$colData$samples,ntop = 500,col = genc$colData$batch,shape = genc$colData$line)
+genc$pca(label = genc$colData$samples,ntop = 200,col = genc$colData$batch,shape = genc$colData$line)
+```
+
+### 6. Misc analyses
+#### Most variable genes
+```{r heat variable}
+## Most variable genes 
+mostVariableHeat(data = genc$VST,ntop = 20,a1 = genc$colData$species,a2=genc$colData$line,n1="Species",n2="Line")
+```
+
+#### Look at a defined set of genes
+#### Defined: KRABs
+```{r }
+## Get a list of krab znf genes
+krab <- read.csv("~/genomicData/KRAB-ZNF/hg38.KRAB.ZNF.txt",header=F,stringsAsFactors = F)
+krab.vec <- c(c(krab)$V1,"ZEB2","ZNF542")
+heatGenes(data=genc$VST,genes = krab.vec,a1 = genc$colData$species,a2=genc$colData$line,n1="Species",n2="Cell Line",sd = 1,z=T)
+```
+
+#### Defined set: Nowick TFs (Differentially expressed in human vs chimp forebrain)
+```{r}
+###### Nowick regulators
+TF <- read.csv("/home/pbrattaas/Dropbox (MN)/Per/PhD/Projects/KRAB-ZNF/Literature/Nowick.topBC.ID.txt",header=F,stringsAsFactors = F)
+TF.vec <- c(c(TF)$V1,"ZEB2","ZNF542")
+## All Nowick factors
+heatGenes(data = genc$VST,genes = TF.vec,a1 = genc$colData$species,a2=genc$colData$line,n1="Species",n2="Cell Line",sd = .0,z=F)
+```
+
+#### Defined set: NPC / Neural / Pluripotency genes
+```{r}
+####### MARKERS
+markers <- c("MAP2","RBFOX3","SYP","OTX1","OTX2","FOXG1","PAX6","LHX2","EMX1","EOMES",
+             "MYT1L","REST","ASCL1","POU3F2","PTBP","NEUROD1","OLIG2",
+             "FOXG2","FOXG1","TUBB","POU5F1","^SOX2$","PAX6","MEIS2","NKX2-1")
+
+# order samples for visualization
+order <- c(c(1,4,7,10,13,16,19,22),c(1,4,7,10,13,16,19,22)+1,c(1,4,7,10,13,16,19,22)+2)
+genc$colData[order,]
+heatGenes(data = assay(genc$VST)[,order],genes = markers,a1 = genc$colData$species[order],a2=genc$colData$line[],n1="Species",n2="Cell Line",sd = .0,z=F,cluster_col = F)
+
+```
+
+#### Custom heatmaps
+```{r}
+
+library(pheatmap)
+library(graphics)
+library(RColorBrewer)
+
+## custom heatmaps
+match <- paste(markers, collapse = "$|^")
+genes.exp <- assay(genc$VST)[grep(match, rownames(assay(genc$VST))), order]
+sd.exp <- apply(genes.exp, 1, sd)
+plotData <- genes.exp[sd.exp > 0, ]
+
+a1 <- genc$colData$line
+a2 <- genc$colData$species
+a3 <- genc$colData$batch
+
+df <- data.frame(Var1 = factor(a1), Var2 = factor(a2),Var3 = factor(a3))
+df <- df[order,]
+rownames(df) <- colnames(plotData)
+colnames(df) <- c("Line", "Species","Batch")
+
+cols <- colorRampPalette(brewer.pal(9, "Set1"))
+mycolors <- cols(length(unique(a1)))
+names(mycolors) <- unique(a1)
+cols <- colorRampPalette(brewer.pal(7, "Set3"))
+mycolors2 <- cols(length(unique(a2)))
+names(mycolors2) <- unique(a2)
+cols <- colorRampPalette(brewer.pal(7, "Set2"))
+mycolors3 <- cols(length(unique(a3)))
+names(mycolors3) <- unique(a3)
+
+mycolors <- list(a = mycolors, b = mycolors2, c = mycolors3)
+#names(mycolors) <- c(n1, n2, n3)
+
+pheatmap(plotData, annotation_col = df, annotation_colors = mycolors, 
+         fontsize_row = 4, cluster_rows = T, show_rownames = T, 
+         cluster_cols = F, scale = 'none',gaps_col = seq(4,4*6,by=4),color = rev(colorRampPalette(brewer.pal(10,"RdBu"))(100)))
+
+## scale on row
+pheatmap(plotData, annotation_col = df, annotation_colors = mycolors, 
+         fontsize_row = 4, cluster_rows = T, show_rownames = T, 
+         cluster_cols = F, scale = 'row',gaps_col = seq(4,4*6,by=4),color = rev(colorRampPalette(brewer.pal(10,"RdBu"))(100)))
+
+```
+
+
+### 7. Look more into changes in human and chimp, ignoring day of differentiation
+#### 7.1 Make new deseqAbs object with cell line as design condition
+```{r}
+## make new object, with lines as conditions
+colDat <- data.frame(species=species,time=time,condition_day=cond,condition=line,samples=samples[-c(1:6)],batch=batch)
+```
+##### Create the object, and perform automated data processing and sample QC
+```{r}
+#####  create object with cell line, excluding time point as design condition ######### 
+genc <- deseqAbs$new(name="gencode_lineCond",filename=path,colData=colDat)
+genc$fullAuto()
+genc$sampleQC()
+```
+
+#### 7.2 PCA to check for batch effect - do this again just in case the new design screws up normalization..
+```{r}
+genc$pca(label = genc$colData$samples,ntop = 5000,col = genc$colData$batch,shape = genc$colData$condition)
+genc$pca(label = genc$colData$samples,ntop = 500,col = genc$colData$batch,shape = genc$colData$condition)
+genc$pca(label = genc$colData$samples,ntop = 200,col = genc$colData$batch,shape = genc$colData$condition)
+
+## Looks similar to pca above
+```
+
+
+#### 7.3 Perform differential expression analysis
+##### Check human iPS vs chimp iPS
+```{r}
+## test: Chimp iPS vs human iPS
+## List the possible conditions to use in test
+resultsNames(genc$deseq)
+## test hsIPS vs ptIPS
+genc$makeDiffex(name = "chips_vs_hips",c1 = "hs_iPS",c2="pt_iPS")
+## Access the test results!
+genc$test$chips_vs_hips
+
+meanPlot(exp = genc$baseMean$Mean[,2:3],test = genc$test$chips_vs_hips[!is.na(genc$test$chips_vs_hips$log2FoldChange),],
+         p = 1e-6,c1 = "h.sapiens",c2 = "pan.troglodytes")
+maPlot(test = genc$test$chips_vs_hips[!is.na(genc$test$chips_vs_hips$log2FoldChange),],p = 1e-6,c1 = "h.sapiens",c2 = "pan.troglodytes")
+signup <- getSignName(x = genc$test$chips_vs_hips,p = 1e-6,l=0)
+```
+##### Most significant genes
+```{r}
+#most.sign <- genc$significantHeat(test = genc$test$chips_vs_hips)
+mostSignificantHeat(data = genc$VST,test = genc$test$chips_vs_hips,ntop = 15,a1 = genc$colData$condition,a2=genc$colData$batch,n1="cell line",n2="batch")
+
+```
+
+
+##### Write up, down and expressed genes to file for GO analysis
+```{r }
+#write.table(x = signup$up,file = "Results/Second/characterization/human.vs.chimp/sign.up.Human.vs.Chimp.p.e-6.txt",quote = F,row.names = F,col.names = F)
+#write.table(x = signup$down,file = "Results/Second characterization/human.vs.chimp/sign.down.Human.vs.Chimp.p.e-6.txt",quote = F,row.names = F,col.names = F)
+#write.table(x = rownames(genc$baseMean$Mean[rowMeans(genc$baseMean$Mean)>5,]),file = "Results/Second characterization/human.vs.chimp/genes.exp.5.allcond.txt",row.names = F,quote = F,col.names = F)
+
+```
+
+
+
+#### 7.4 Get genes close to SVAs!
+```{r}
+## get genes close to SVAs ( E and F families are human specific)
+# read SVA bedfile
+sva <- read.delim(file = '~/genomicData/Repeats/hg38/SVA.hg38.bed',header=F,col.names = c("Chr","Start","End","ID",".","Strand"))
+head(sva)
+svaE <- sva[grep("SVA_E",sva$ID),]
+svaF <- sva[grep("SVA_F",sva$ID),]
+
+# get genes close
+genes.close.SVA.E <- closeGenes(b = svaE,d= 10000)
+tail(genes.close.SVA.E)
+genes.close.SVA.E[grep("C9orf64",genes.close.SVA.E$A_ID),]
+genes.close.SVA.F <- closeGenes(b = svaF,d= 10000)
+tail(genes.close.SVA.F)
+
+```
+
+#### 7.5 Get the differential expression data of those genes! and plot their z score and VST values
+```{r}
+ord.all <- order(genc$colData$condition)
+# get diffex of close genes
+svaE.close.diff <- getGenes(data = genc$test$chips_vs_hips,genes = as.character(genes.close.SVA.E$A_ID))
+svaF.close.diff <- getGenes(data = genc$test$chips_vs_hips,genes = as.character(genes.close.SVA.F$A_ID))
+
+heatGenes(data = assay(genc$VST)[,ord.all],genes = as.character(genes.close.SVA.E$A_ID),
+          sd=.5,cluster_col = F,
+          a1 = genc$colData$condition[ord.all],n1='Cell line',a2 = genc$colData$time[ord.all],n2 = 'Time',z = T)
+
+heatGenes(data = assay(genc$VST)[,ord.all],genes = as.character(genes.close.SVA.E$A_ID),
+          sd=.745,cluster_col = F,
+          a1 = genc$colData$condition[ord.all],n1='Cell line',a2 = genc$colData$time[ord.all],n2 = 'Time',z = F)
+
+
+```
+
+##### This can be interesting to compare with a random sample of genes
+```{r}
+## get diffex of random genes
+#random.diff <- getGenes(data = genc$test$chips_vs_hips,genes = sample(x = rownames(genc$pos),size = nrow(genes.close.SVA.E),replace = F))
+## peak at a random sample of the randomly selected genes..
+#random.diff[sample(x = 1:nrow(random.diff),size = 10,replace = F),]
+
+```
+
+#### Do the same for FLI L1s
+```{r}
+
+## get genes close to L1HS
+# read L1HS bedfile
+fL1 <- read.delim(file = '~/genomicData/Repeats/hg38/L1/L1hot/FLI/FLI-L1.bed',header=F,skip=1)
+fL1 <- fL1[,1:6]
+colnames(fL1) <- c("Chr","Start","End","ID",".","Strand")
+head(fL1)
+tail(fL1)
+
+# get genes close
+genes.close.fL1 <- closeGenes(b = fL1,d= 50000)
+tail(genes.close.fL1)
+
+# get diffex of close genes
+fL1.close.diff <- getGenes(data = genc$test$chips_vs_hips,genes = as.character(genes.close.fL1$A_ID))
+
+heatGenes(data = assay(genc$VST)[,ord.all],genes = as.character(genes.close.fL1$A_ID),
+          sd=.5,cluster_col = F,
+          a1 = genc$colData$condition[ord.all],n1='lINE',a2 = genc$colData$time[ord.all],n2 = 'Time',z = T)
+
+heatGenes(data = assay(genc$VST)[,ord.all],genes = as.character(genes.close.fL1$A_ID),
+          sd=.745,cluster_col = F,
+          a1 = genc$colData$condition[ord.all],n1='Cell line',a2 = genc$colData$time[ord.all],n2 = 'Time',z = F)
+
+```
+
+#### L1HS
+```{r}
+
+## get genes close to L1HS
+# read L1HS bedfile
+L1 <- read.delim(file = '~/genomicData/Repeats/hg38/L1/hg38.L1HS.fa.bed',header=F,skip=1)
+L1 <- L1[,1:6]
+colnames(L1) <- c("Chr","Start","End","ID",".","Strand")
+head(L1)
+# get genes close
+genes.close.L1 <- closeGenes(b = L1,d=5000)
+head(genes.close.L1)
+# get diffex of close genes
+L1.close.diff <- getGenes(data = genc$test$chips_vs_hips,genes = as.character(genes.close.L1$A_ID))
+
+heatGenes(data = assay(genc$VST)[,ord.all],genes = as.character(genes.close.L1$A_ID),
+          sd=.5,cluster_col = F,
+          a1 = genc$colData$condition[ord.all],n1='Cell line',a2 = genc$colData$time[ord.all],n2 = 'Time',z = T)
+
+heatGenes(data = assay(genc$VST)[,ord.all],genes = as.character(genes.close.L1$A_ID),
+          sd=.745,cluster_col = F,
+          a1 = genc$colData$condition[ord.all],n1='Cell line',a2 = genc$colData$time[ord.all],n2 = 'Time',z = F)
+```
+
+## Look at only human iPS or chimp iPS
+```{r}
+### Genes dynamic in human iPS diff: 
+#### use only human iPS samples 
+head(genc$rawCounts)
+# take, from rawCounts of original object, only hs_iPS columns
+hips.countData <- genc$rawCounts[,grepl("hs_iPS",colnames(genc$rawCounts))]
+cips.countData <- genc$rawCounts[,grepl("pt_iPS",colnames(genc$rawCounts))]
+# take metadata from these columns in colDat
+## fix colData
+line <- rep(c("pt_iPS","hs_iPS","h9"),8)
+species <- rep(c("chimp","human","human"),8)
+time <- rep(c(rep("d13",3),rep("d14",3),rep("d15",3),rep("d16",3)),2)
+cond <- paste(line,time,sep = "-")
+batch <- rep(c("batch_1","batch_2"),each=12)
+colDat <- data.frame(species=species,time=time,condition=cond,line=line,samples=samples[-c(1:6)],batch=batch)
+
+hips.colDat <- colDat[grepl("hs_",colDat$condition),]
+cips.colDat <- colDat[grepl("pt_",colDat$condition),]
+# create new object, that we will modify
+# originally we use the raw featureCount, but this file will be modified by changing RawCounts and ColData!
+hips <- deseqAbs$new(name="hips",filename=path,colData=genc$colData)
+cips <- deseqAbs$new(name="cips",filename=path,colData=genc$colData)
+# Set new rawCounts!
+hips$rawCounts <- hips.countData
+cips$rawCounts <- cips.countData
+# Set new colData!
+hips$colData <- hips.colDat
+cips$colData <- cips.colDat
+# processing will now be done with only hsIPS samples!
+hips$fullAuto()
+cips$fullAuto()
+# check what was the default test..
+hips$test$Default
+cips$test$Default
+```
+
+#### plot significantly changed genes (from d13 to d16 in human iPS)
+```{r}
+# it was d16 vs 13 - so this is interesting.. Lets look at the most sign genes
+sign <- getSign(x = hips$test$Default,p = .005)
+maPlot(test = hips$test$Default[!is.na(hips$test$Default$log2FoldChange),],c1 = "d16",c2 = "d13",p = .01)
+meanPlot(exp = hips$baseMean$Mean[,c(1,4)],test = hips$test$Default,p = .01,c1 = "d13",c2 = "d16")
+
+```
+
+
+#### Plot sign changed genes 
+##### Create function to plot first human iPS, then chimp iPS, then all samples
+```{r}
+# order by condition
+ord.con <- c(1,5,2,6,3,7,4,8)
+genc$colData[order(genc$colData$condition_day),]
+ord.all <- order(genc$colData$condition_day)
+# look at the significantly upregulated genes
+
+## function to plot
+plotHeats <- function(sdCut,genes) {
+  g <- heatGenes(data = assay(hips$VST)[,ord.con],genes = genes,a1 = hips$colData$condition[ord.con],n1 = 'day',sd = sdCut,cluster_col = F)
+  # Look at these in chimp samples
+  heatGenes(data = assay(cips$VST)[,ord.con],genes = g,a1 = cips$colData$condition[ord.con],n1 = 'day',cluster_col = F,sd=0)
+  # Look at these in all samples
+  heatGenes(data = assay(genc$VST)[,ord.all],genes = g,a1 = genc$colData$time[ord.all],a2=genc$colData$condition[ord.all],n1 = 'day',n2 = 'line',cluster_col = F,sd=0)
+}
+
+```
+
+##### Plot sign.up genes
+```{r}
+# plot sign up genes (hs iPS d16 vs d13)
+genes <- rownames(sign$up)
+plotHeats(sdCut = .0,genes = genes)
+```
+
+```{r}
+plotHeats(sdCut = .8,genes = genes)
+```
+
+```{r}
+plotHeats(sdCut = 1,genes = genes)
+```
+
+```{r}
+plotHeats(sdCut = 1.2,genes = genes)
+```
+
+#### Look at downregulated genes
+```{r}
+# plot sign down genes (hs iPS d16 vs d13)
+genes <- rownames(sign$down)
+plotHeats(sdCut = .02,genes = genes)
+```
+
+```{r}
+plotHeats(sdCut = .3,genes = genes)
+```
+
+```{r}
+plotHeats(sdCut = .6,genes = genes)
+```
+
+
+
+

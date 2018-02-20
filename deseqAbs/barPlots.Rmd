@@ -1,0 +1,80 @@
+---
+title: "Barplots from RNAseq data"
+author: "Per Ludvik Brattaas"
+date: "January 17, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.height=7, fig.width=4.5)
+```
+
+## Make barplots with deseqAbstractions
+
+### 1. Setup environment
+```{r envir_setup, results='hide'}
+## plot markers FPKM
+rm(list=ls())
+gc()
+
+# load deseqAbstraction
+#install.packages("reshape")
+library(reshape)
+library(DESeq2)
+library(devtools)
+install_github("perllb/deseqAbstraction")
+library(deseqAbstraction)
+```
+
+### 2. Create deseqAbs object that stores your count data output
+```{r make_object}
+#Path to featureCount file
+path <- "/home/pbrattaas/Dropbox (MN)/Per/PhD/Projects/DNAmeth/hNES DNMT1 KO/RNAseq/PairedParam/Quant/hg38.NCBI.genesBestRefSeq.exon.primary.s2.txt" 
+#Suitable names for you samples, can also be original sample names (e.g. 107,108..112 etc)
+samples <- c("hNES_CTR_1","hNES_CTR_2","hNES_CTR_3","hNES_KO_1","hNES_KO_2","hNES_KO_3")
+#Create colData data.frame with condition (the main groups of the data), and samples. These are minimum requirements for colData
+colData <- data.frame(condition=rep(c("CTR","DNMT1-KO"),each=3),samples=samples)
+#Define the design formula used in
+design <- formula(~ condition)
+
+#Create deseqAbs object
+dnmt <- deseqAbs$new(name="dnmt1",path,colData=colData,design=design)
+```
+
+### 3. plot genes in FPKM, including points for each sample
+#### Note that to make these plots, many computations are required. 
+#### E.g. you have to do:
+#### - Diffex analysis
+#### - Compute average read counts and SE for each condition for each gene
+#### - Compute average FPKM and SE for each condition for each gene
+#### This is done automatically by function, so you do not have to worry about that!
+
+```{r plot1}
+#Define which genes you want to plot
+genes <- c("SOX2","NES","FABP7","XIST")
+#Plot genes.
+#Note that to make these plots, many computations are required. 
+#E.g. you have to do Diffex analysis, compute averages and SE for each condition for each gene etc.. 
+#This is done automatically by function, so you do not have to worry about that!
+
+# plot in FPKM values
+dnmt$meanBars(genes = genes,FPKM = T,points=T)
+```
+
+### 4. Plot FPKM, without points
+```{r fig2}
+# plot in FPKM values
+dnmt$meanBars(genes = genes,FPKM = T,points=F)
+```
+
+### 5. Plot genes in mean norm. read counts, with points
+```{r fig3}
+# plot in mean normalized reads in each condition
+dnmt$meanBars(genes = genes,FPKM = F,points=T)
+```
+
+### 6. Plot genes in mean norm. read counts, without points
+```{r fig4}
+# plot in mean normalized reads in each condition
+dnmt$meanBars(genes = genes,FPKM = F,points=F)
+```
