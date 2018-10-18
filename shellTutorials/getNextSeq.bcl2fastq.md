@@ -31,7 +31,7 @@ sftp -P 22220 <username>@aurora-ls2.lunarc.lu.se
 echo "#!/bin/bash
 
 #SBATCH -n 20
-#SBATCH -N 1ik
+#SBATCH -N 1
 #SBATCH -A lsens2017-3-2
 #SBATCH -p dell
 #SBATCH -t 03:00:00
