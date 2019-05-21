@@ -32,7 +32,7 @@ echo "#!/bin/bash
 
 #SBATCH -n 20
 #SBATCH -N 1
-#SBATCH -A lsens2017-3-2
+#SBATCH -A lsens2018-3-3
 #SBATCH -p dell
 #SBATCH -t 03:00:00
 #SBATCH -J bcl2fastq
@@ -40,10 +40,11 @@ echo "#!/bin/bash
 #SBATCH -e bcl2fastq.err
 
  # load modules
-ml  GCCcore/6.3.0  bcl2fastq/2.19.1
+ml   GCC/7.3.0-2.30  OpenMPI/3.1.1
+ml bcl2fastq2/2.20.0
 
  # run bcl2fastq
- bcl2fastq --sample-sheet SampleSheet.csv --no-lane-splitting
+ bcl2fastq --sample-sheet sample_sheet_seq035.csv --no-lane-splitting
 
  " > run_bcl2fastq.sh
 
