@@ -43,7 +43,8 @@ echo "#!/bin/bash
 ml  GCCcore/6.3.0  bcl2fastq/2.19.1
 
  # run bcl2fastq
- bcl2fastq
+ bcl2fastq --sample-sheet SampleSheet.csv --no-lane-splitting
+
  " > run_bcl2fastq.sh
 
 ```
